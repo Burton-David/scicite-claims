@@ -63,3 +63,12 @@ warn_redundant_casts = true
 [[tool.mypy.overrides]]
 module = ["spacy", "spacy.*"]
 ignore_missing_imports = true
+
+# numpy ships PEP 695 `type` statements in its stubs, which mypy refuses to
+# parse while python_version targets anything below 3.12. numpy arrives here
+# transitively through spaCy and is not part of this package's public surface,
+# so skip its stubs rather than raise the target version and stop checking 3.11.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true

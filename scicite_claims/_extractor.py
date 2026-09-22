@@ -1,4 +1,4 @@
-"""``ClaimExtractor`` — sync pattern + spaCy pipeline.
+"""``ClaimExtractor``: sync pattern + spaCy pipeline.
 
 Pipeline per :meth:`ClaimExtractor.extract`:
 
@@ -8,15 +8,16 @@ Pipeline per :meth:`ClaimExtractor.extract`:
 2. Apply the regex patterns from :mod:`._patterns` and emit a
    :class:`Claim` per match.
 3. For each claim, derive ``suggested_search_terms`` from the spaCy
-   noun chunks within the claim's *context window* — a one-word claim
+   noun chunks within the claim's *context window*. A one-word claim
    like "outperforms" has nothing to search, but its surrounding noun
    chunks do.
-4. Deduplicate by overlapping spans, keeping higher confidence.
+4. Drop spans that overlap an earlier kept span. Same-start ties go to
+   the higher-confidence claim.
 5. Sort by ``start_char`` so callers see claims in document order.
 
-Async callers can wrap with ``asyncio.to_thread(extractor.extract, text)``
-— spaCy's pipeline releases the GIL during its rust-backed work, so
-this is genuinely parallelizable.
+Async callers can wrap with ``asyncio.to_thread(extractor.extract, text)``.
+spaCy is written in Cython and releases the GIL in parts of its pipeline,
+so the thread offload keeps the event loop responsive.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ _DEFAULT_CONTEXT_CHARS: Final = 100
 _MAX_SEARCH_TERMS: Final = 5
 _HOW_TO_INSTALL: Final = (
     "Install spaCy and the small English model:\n"
-    "  pip install scicite-claims\n"
+    '  pip install "scicite-claims @ git+https://github.com/Burton-David/scicite-claims@v0.1.0"\n'
     "  python -m spacy download en_core_web_sm"
 )
 
@@ -87,8 +88,9 @@ class ClaimExtractor:
                 returns an empty tuple.
 
         Returns:
-            Claims in document order. Overlapping pattern matches are
-            deduplicated, keeping the higher-confidence span.
+            Claims in document order. When pattern matches overlap, the
+            one that starts first is kept; same-start ties go to the
+            higher-confidence match.
         """
         if not text or not text.strip():
             return ()
@@ -133,7 +135,7 @@ def extract_claims(text: str) -> tuple[Claim, ...]:
 def _load_spacy(model_name: str) -> Language:
     try:
         import spacy
-    except ImportError as exc:  # pragma: no cover — environment-specific
+    except ImportError as exc:  # pragma: no cover, environment-specific
         raise RuntimeError(
             f"spaCy is required for scicite-claims. {_HOW_TO_INSTALL}"
         ) from exc
@@ -157,7 +159,7 @@ def _search_terms_for(
     """Pull up to ``_MAX_SEARCH_TERMS`` noun-chunk-derived search terms.
 
     For METHODOLOGICAL claims, proper-noun tokens from the context
-    window are also surfaced — method names like "Adam" or "BERT"
+    window are also surfaced, since method names like "Adam" or "BERT"
     make distinctive query refinements.
     """
     lo = max(0, start - window)
@@ -192,11 +194,13 @@ def _clean_chunk(text: str) -> str:
 def _dedup_claims(claims: Iterable[Claim]) -> list[Claim]:
     """Sort by (start_char, -confidence) and drop spans that overlap a kept one.
 
-    Two patterns can fire on the same text — e.g., "improved by 23%"
-    matches both the percent-change rule and the directional-change
-    rule. Without dedup, the same statement surfaces as two Claims.
-    Sorting by ``-confidence`` first means we always keep the higher-
-    precision variant on overlap.
+    Two patterns can fire on overlapping text: "statistically significant
+    correlation" hits both "statistically significant" and "significant
+    correlation". ("improved by 23%" hits only the directional-change
+    rule; the percent-change rule needs the number first.) Without dedup,
+    one statement surfaces as two Claims. The earlier span wins an
+    overlap. The ``-confidence`` key only breaks ties between spans that
+    start at the same offset.
     """
     ordered = sorted(claims, key=lambda c: (c.start_char, -c.confidence))
     kept: list[Claim] = []

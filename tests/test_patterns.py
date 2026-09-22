@@ -37,7 +37,7 @@ def test_statistical_patterns_match_correlation() -> None:
 
 def test_statistical_patterns_match_sample_size() -> None:
     assert _matches_any(STATISTICAL_PATTERNS, "n = 512")
-    # The pattern is intentionally `sample (size|of) <num>` — it catches
+    # The pattern is intentionally `sample (size|of) <num>`; it catches
     # "sample size 100" or "sample of 100" but does NOT catch the longer
     # "sample size of 100" phrasing. Captured here so future tightening
     # of the pattern can decide whether to broaden coverage.
@@ -102,3 +102,22 @@ def test_confidence_for_returns_default_for_unmapped_type() -> None:
     """FACTUAL / EVALUATIVE aren't in the regex map; the fallback is 0.7."""
     assert confidence_for(ClaimType.FACTUAL) == 0.7
     assert confidence_for(ClaimType.EVALUATIVE) == 0.7
+
+
+def test_improved_by_percent_hits_only_the_directional_rule() -> None:
+    # The README and the _dedup_claims docstring once said this phrase hit two
+    # rules. It hits one: the percent-change rule needs the number first.
+    hits = [p for p in STATISTICAL_PATTERNS if re.search(p, "improved by 23%", re.IGNORECASE)]
+    assert hits == [STATISTICAL_PATTERNS[1]]
+    assert [m.group() for _, m in iter_pattern_matches("Accuracy improved by 23%.")] == [
+        "improved by 23%"
+    ]
+
+
+def test_no_pattern_emits_factual_or_evaluative() -> None:
+    """The README table lists only the five types that have patterns."""
+    emitted = {claim_type for claim_type, _ in iter_pattern_matches(
+        "A major advance: BERT is a language model defined by Devlin et al."
+    )}
+    assert ClaimType.FACTUAL not in emitted
+    assert ClaimType.EVALUATIVE not in emitted

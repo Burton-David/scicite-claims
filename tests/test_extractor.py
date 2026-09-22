@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from scicite_claims import ClaimExtractor, ClaimType, extract_claims
+from scicite_claims._extractor import _load_spacy
 
 # ---- coverage per claim type ----
 
@@ -72,7 +75,7 @@ def test_claims_returned_in_document_order(extractor: ClaimExtractor) -> None:
 
 
 def test_overlapping_matches_are_deduplicated(extractor: ClaimExtractor) -> None:
-    """Multiple regexes can fire on the same span — return one Claim per span."""
+    """Multiple regexes can fire on the same span; return one Claim per span."""
     from itertools import pairwise
 
     text = "Accuracy improved by 30%."
@@ -86,6 +89,28 @@ def test_overlapping_matches_are_deduplicated(extractor: ClaimExtractor) -> None
         assert a_end <= b_start, (
             f"overlap: ({a_start},{a_end}) and ({b_start},{b_end})"
         )
+
+
+def test_earlier_overlapping_span_wins_over_later_one(extractor: ClaimExtractor) -> None:
+    # "statistically significant" (2..27) and "significant correlation" (16..39)
+    # are both STATISTICAL at 0.9; the earlier start is the one that survives.
+    claims = extractor.extract("A statistically significant correlation.")
+    assert [c.text for c in claims] == ["statistically significant"]
+
+
+def test_readme_sample_produces_the_documented_claims(extractor: ClaimExtractor) -> None:
+    # Same input as the README's first code block. If this changes, update the
+    # sample output there too. "We achieved" is not a METHODOLOGICAL trigger.
+    text = (
+        "Our model outperforms BERT on three benchmarks. "
+        "We achieved a 23% improvement in F1 using gradient boosting."
+    )
+    claims = extractor.extract(text)
+    assert [(c.type, c.text) for c in claims] == [
+        (ClaimType.COMPARATIVE, "outperforms"),
+        (ClaimType.STATISTICAL, "23% improvement"),
+    ]
+    assert "BERT" in claims[0].suggested_search_terms
 
 
 def test_extract_returns_empty_for_empty_text(extractor: ClaimExtractor) -> None:
@@ -111,7 +136,7 @@ def test_each_claim_has_non_empty_context(extractor: ClaimExtractor) -> None:
 def test_each_claim_has_search_terms_when_nouns_present(
     extractor: ClaimExtractor,
 ) -> None:
-    """Search terms drive downstream queries — must be non-empty for non-trivial claims."""
+    """Search terms drive downstream queries, so they must be non-empty for non-trivial claims."""
     text = "Multi-head attention outperforms LSTMs on machine translation tasks."
     claims = list(extractor.extract(text))
     assert claims
@@ -147,7 +172,7 @@ def test_search_terms_capped_at_five(extractor: ClaimExtractor) -> None:
 
 
 def test_search_terms_filter_stop_pronouns(extractor: ClaimExtractor) -> None:
-    """'we', 'they', 'it' etc. shouldn't appear as search terms — they aren't useful queries."""
+    """'we', 'they', 'it' etc. shouldn't appear as search terms; they aren't useful queries."""
     text = "We outperform their model significantly on every benchmark we tested."
     for c in extractor.extract(text):
         terms_lower = {t.lower() for t in c.suggested_search_terms}
@@ -205,7 +230,7 @@ def test_module_level_extract_claims_returns_empty_for_no_triggers() -> None:
 
 
 def test_module_level_extract_claims_caches_extractor() -> None:
-    """Repeated calls reuse the cached extractor — no model-load each time."""
+    """Repeated calls reuse the cached extractor, no model-load each time."""
     import scicite_claims._extractor as ext_mod
 
     # Trigger first call to populate the cache.
@@ -214,3 +239,10 @@ def test_module_level_extract_claims_caches_extractor() -> None:
     extract_claims("Sleep leads to fatigue.")
     second = ext_mod._default_extractor
     assert first is second
+
+
+def test_missing_model_error_points_at_the_github_install() -> None:
+    # The package is not on PyPI, so a bare "pip install scicite-claims" hint
+    # would send people to a 404.
+    with pytest.raises(RuntimeError, match=r"git\+https://github\.com/Burton-David/scicite-claims"):
+        _load_spacy("scicite_no_such_model")

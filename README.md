@@ -1,5 +1,9 @@
 # scicite-claims
 
+[![CI](https://github.com/Burton-David/scicite-claims/actions/workflows/ci.yml/badge.svg)](https://github.com/Burton-David/scicite-claims/actions/workflows/ci.yml)
+[![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Citation-aware claim extraction for scientific text. Regex patterns + spaCy noun-chunk analysis. No LLM, no API calls, no key required.
 
 ```python
